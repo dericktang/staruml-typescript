@@ -423,15 +423,15 @@ class TypeScriptCodeGenerator {
         this.writeDoc(codeWriter, doc, options);
 
         // Modifiers
-        // var _modifiers = this.getModifiers(elem);
-        // if (elem.operations.some(function(op) {
-        //         return op.isAbstract === true;
-        //     })) {
-        //     _modifiers.push("abstract");
-        // }
-        // if (_modifiers.length > 0) {
-        //     terms.push(_modifiers.join(" "));
-        // }
+        var _modifiers = this.getModifiers(elem);
+        if (elem.operations.some(function(op) {
+                return op.isAbstract === true;
+            })) {
+            _modifiers.push("abstract");
+        }
+        if (_modifiers.length > 0) {
+            terms.push(_modifiers.join(" "));
+        }
 
         // Class
         terms.push("class");

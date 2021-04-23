@@ -21,7 +21,26 @@ class TypeScriptCodeGenerator {
 
         /** @member {string} */
         this.basePath = basePath;
-
+        console.log("AST===>>>>>",basePath, baseModel);
+        this.newBasePath =basePath+"\\"+baseModel.name;
+        deleteall( this.newBasePath);
+        function deleteall(path) {
+            var files = [];
+            if(fs.existsSync(path)) {
+                files = fs.readdirSync(path);
+                files.forEach(function(file, index) {
+                    var curPath = path + "/" + file;
+                    if(fs.statSync(curPath).isDirectory()) { // recurse
+                        deleteall(curPath);
+                    } else { // delete file
+                        fs.unlinkSync(curPath);
+                    }
+                });
+                try{
+                    fs.rmdirSync(path);
+                }catch(e){}
+            }
+        }
     }
 
     /**
@@ -53,13 +72,36 @@ class TypeScriptCodeGenerator {
         var fullPath;
         var codeWriter;
         var isAnnotationType = (elem.stereotype !== undefined && elem.stereotype === "annotationType");
-
-        console.log('generate', 'elem', elem);
-
         // Package
         if (elem instanceof type.UMLPackage) {
-            console.log(basePath);
             fullPath = path.join(basePath, elem.name)
+            console.log("1AST===>>>>>",basePath,fullPath);
+            // let files = fs.readdirSync(basePath);
+            // for(let j of files){
+            //     //同步操作删除css文件夹
+            //     try{
+            //     let file = fs.statSync(path.join(basePath, j));
+            //     if(file.isFile()){
+            //         fs.unlinkSync(path.join(basePath, j));
+            //     }else if(file.isDirectory()){
+            //         // fs.rmdirSync(path.join(fullPath, j));
+            //     }else{
+            //         console.log('抱歉这不是一个文件或者文件夹');
+            //     }
+            //     }catch(e){
+
+            //     }
+            // }
+            // try{
+            //     fs.mkdirSync(fullPath)
+            // }catch(e){
+            //     let files = fs.readdirSync(fullPath);
+            //     for(let j of files){
+            //         fs.unlinkSync(path.join(fullPath, j));
+            //     }
+            //     fs.rmdirSync(fullPath);
+                
+            // }
             fs.mkdirSync(fullPath)
             if (Array.isArray(elem.ownedElements)) {
                 elem.ownedElements.forEach(child => {
@@ -105,7 +147,10 @@ class TypeScriptCodeGenerator {
                 // codeWriter.writeLine();
                 this.writeClass(codeWriter, elem, options, isAnnotationType);
                 // this.writeNamespace("writeClass", codeWriter, elem, options, isAnnotationType);
-                fs.writeFileSync(fullPath, codeWriter.getData())
+                if (elem.stereotype==null){
+                    fs.writeFileSync(fullPath, codeWriter.getData())
+                }
+                
             }
         } else if (elem instanceof type.UMLInterface) {
             // Interface
@@ -209,6 +254,40 @@ class TypeScriptCodeGenerator {
      */
     writeInterface(codeWriter, elem, options) {
         var i, len, terms = [];
+        
+        function getPackage(target,result){
+            console.log("target.name",target);
+            result.push(target.name);
+            if (target._parent) {
+                getPackage(target._parent,result);
+            }
+            return result;
+        }
+
+        if (elem.ownedElements){
+            for(let j of elem.ownedElements){
+                if(j instanceof type.UMLDependency){
+                    if(j.target)
+                    var packageInfo = getPackage(j.target._parent,[]);
+                    if(packageInfo){
+                        packageInfo.reverse();
+                        packageInfo.shift();
+                    }
+                    
+                    
+                    let selfPackage = getPackage(elem._parent,[]);
+                    let out = packageInfo.filter((item)=>{
+                        if (selfPackage.indexOf(item)!=-1){ //有相同的
+                            return false;
+                        }
+                        return true;
+                    });
+                    let depFile = "./"+out.join("/")+"/"+j.target.name;
+                    codeWriter.writeLine(`import ${j.target.name} from '${depFile}';`);
+                    console.log('依赖的' ,packageInfo,selfPackage);
+                }
+            }
+        }
 
         // Doc
         this.writeDoc(codeWriter, elem.documentation, options);
@@ -220,7 +299,7 @@ class TypeScriptCodeGenerator {
         // }
 
         // Interface
-        terms.push("interface");
+        terms.push("export default interface");
         terms.push(elem.name);
 
         // Extends
@@ -238,6 +317,11 @@ class TypeScriptCodeGenerator {
             this.writeMemberVariable(codeWriter, elem.attributes[i], options);
             // codeWriter.writeLine();
         }
+
+
+
+        
+
         // (from associations)
         var associations = app.repository.getRelationshipsOf(elem, function (rel) {
             return (rel instanceof type.UMLAssociation);
@@ -415,6 +499,53 @@ class TypeScriptCodeGenerator {
     writeClass(codeWriter, elem, options) {
         var i, len, terms = [];
 
+        function getPackage(target,result){
+            console.log("target.name",target);
+            result.push(target.name);
+            if (target._parent) {
+                getPackage(target._parent,result);
+            }
+            return result;
+        }
+        if (elem.ownedElements){
+            for(let j of elem.ownedElements){
+                if(j instanceof type.UMLDependency || j instanceof type.UMLGeneralization){
+                    if(j.target)
+                    var packageInfo = getPackage(j.target._parent,[]);
+                    console.log("3=========",JSON.stringify(packageInfo),j.target._parent)
+                    if(packageInfo){
+                        packageInfo.reverse();
+                        packageInfo.shift();
+                    }
+                    
+                    
+                    let selfPackage = getPackage(elem._parent,[]);
+                    let out = packageInfo.filter((item)=>{
+                        if (selfPackage.indexOf(item)!=-1){ //有相同的
+                            return false;
+                        }
+                        return true;
+                    });
+                    // console.log("=========",packageInfo,selfPackage)
+                    
+                    //这里判断如果是stereotype类型则将替换名称
+                    if (j.target.stereotype!=null){
+                        let depFile = j.target.name;
+                        codeWriter.writeLine(`import ${j.target.stereotype} from '${depFile}';`);
+                    }else{
+                        //这里需要看下interface方式的import
+                        let depFile = "."+out.join("/")+"/"+j.target.name;
+                        if (!depFile.startsWith("./")){
+                            depFile = depFile.replace(".","./")
+                        }
+                        codeWriter.writeLine(`import ${j.target.name} from '${depFile}';`);
+                    }
+                    
+                    console.log('依赖的' ,packageInfo,selfPackage);
+                }
+            }
+        }
+
         // Doc
         var doc = elem.documentation.trim();
         if (app.project.getProject().author && app.project.getProject().author.length > 0) {
@@ -423,24 +554,29 @@ class TypeScriptCodeGenerator {
         this.writeDoc(codeWriter, doc, options);
 
         // Modifiers
-        var _modifiers = this.getModifiers(elem);
-        if (elem.operations.some(function(op) {
-                return op.isAbstract === true;
-            })) {
-            _modifiers.push("abstract");
-        }
-        if (_modifiers.length > 0) {
-            terms.push(_modifiers.join(" "));
-        }
+        // var _modifiers = this.getModifiers(elem);
+        // if (elem.operations.some(function(op) {
+        //         return op.isAbstract === true;
+        //     })) {
+        //     _modifiers.push("abstract");
+        // }
+        // if (_modifiers.length > 0) {
+        //     terms.push(_modifiers.join(" "));
+        // }
 
         // Class
-        terms.push("class");
+        terms.push("export default class");
         terms.push(elem.name);
 
         // Extends
         var _extends = this.getSuperClasses(elem);
+        console.log("==========",_extends)
         if (_extends.length > 0) {
-            terms.push("extends " + _extends[0].name);
+            if (_extends[0].stereotype!=null){
+                terms.push("extends " + _extends[0].stereotype);
+            }else{
+                terms.push("extends " + _extends[0].name);
+            }
         }
 
         // Implements
@@ -462,8 +598,8 @@ class TypeScriptCodeGenerator {
         codeWriter.indent();
 
         // Constructor
-        this.writeConstructor(codeWriter, elem, options);
-        codeWriter.writeLine();
+        // this.writeConstructor(codeWriter, elem, options);
+        // codeWriter.writeLine();
 
         // Member Variables
         // (from attributes)
@@ -473,10 +609,11 @@ class TypeScriptCodeGenerator {
         }
         // (from associations)
         var associations = app.repository.getRelationshipsOf(elem, function (rel) {
+            // console.log('association length: ' ,elem.name,rel.source.name ,rel.target.name,elem,rel);
             return (rel instanceof type.UMLAssociation);
         });
 
-        console.log('association length: ' + associations.length);
+        console.log('association length: ' + associations.length,associations);
 
         for (i = 0, len = associations.length; i < len; i++) {
             var asso = associations[i];
@@ -567,23 +704,26 @@ class TypeScriptCodeGenerator {
                 }
             }
             terms.push(elem.name + "(" + paramTerms.join(", ") + ")");
-
-            // type
-            terms.push(": ");
-            if (returnParam) {
-                terms.push(this.getType(returnParam));
-            } else {
-                terms.push("void");
+            if (elem.name != "constructor"){
+                // type
+                terms.push(": ");
+                if (returnParam) {
+                    terms.push(this.getType(returnParam));
+                } else {
+                    terms.push("void");
+                }
             }
+            
 
             // body
-            if (skipBody === true || _modifiers.includes("abstract")) {
+            if (skipBody === true || (_modifiers && _modifiers.includes("abstract"))) {
                 codeWriter.writeLine(terms.join(" ") + ";");
             } else {
                 codeWriter.writeLine(terms.join(" ") + " {");
                 codeWriter.indent();
                 codeWriter.writeLine("// TODO implement here");
-
+                // 这里可以输入一段代码
+                codeWriter.writeLine(` ${elem.specification}`);
                 // return statement
                 if (returnParam) {
                     var returnType = this.getType(returnParam);
@@ -610,7 +750,7 @@ class TypeScriptCodeGenerator {
                     } else if (returnType === "string") {
                         codeWriter.writeLine('return "";');
                     } else {
-                        codeWriter.writeLine("return null;");
+                        // codeWriter.writeLine("return null;");
                     }
                 }
 
@@ -709,10 +849,10 @@ class TypeScriptCodeGenerator {
             this.writeDoc(codeWriter, elem.documentation, options);
 
             // Visibility
-            var visibility = this.getVisibility(elem);
-            if (visibility) {
-                terms.push(visibility);
-            }
+            // var visibility = this.getVisibility(elem);
+            // if (visibility) {
+            //     terms.push(visibility);
+            // }
             terms.push("constructor()");
             codeWriter.writeLine(terms.join(" ") + " {");
             codeWriter.writeLine("}");
